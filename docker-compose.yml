@@ -1,24 +1,42 @@
-version: '3.7'
+version: '3.8'
+
 services:
-  application:
-    container_name: accent
-    network_mode: "host"
-    build: .
-    ports:
-      - 4000:4000
-    depends_on:
-      - postgresql
+  db:
+    image: postgres:15  # Ou >=9.4
+    restart: unless-stopped
     environment:
-      - PORT=4000
-      - DATABASE_URL=postgres://postgres@localhost:5432/accent_development
-  postgresql:
-    image: postgres:15.6
-    container_name: accent-postgres
-    environment:
-      - POSTGRES_DB=accent_development
-    ports:
-      - 5432:5432
+      POSTGRES_DB: accent_production
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # Sera injecté par Coolify
     volumes:
-      - accent_psql:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: mirego/accent:latest  # Image officielle Docker Hub
+    restart: unless-stopped
+    ports:
+      - "4000"  # Coolify exposera via Traefik
+    environment:
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db/accent_production
+      PORT: 4000
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}  # Génère avec: openssl rand -hex 64
+      CANONICAL_URL: https://${DOMAIN}  # Ton domaine, ex: https://accent.tondomaine.com
+      FORCE_SSL: true
+      DUMMY_LOGIN_ENABLED: 1  # Login dummy pour test (email sans mot de passe). Change en prod !
+      # Ajoute OAuth si besoin: GITHUB_CLIENT_ID, etc.
+      # Email: SMTP_* ou SENDGRID_API_KEY
+    depends_on:
+      db:
+        condition: service_healthy
+    labels:
+      # Pour Traefik/Coolify (auto-géré, mais utile)
+      - "traefik.enable=true"
+      - "traefik.http.routers.accent.rule=Host(`${DOMAIN}`)"
+
 volumes:
-  accent_psql:
+  db_data:
